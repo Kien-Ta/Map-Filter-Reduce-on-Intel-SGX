@@ -61,26 +61,16 @@ enclave {
 	include "../include/hot_calls.h"
   include "../include/common.h"
     trusted {
-    	public void EcallStartResponder( [user_check] HotCall* fastEcall );                                                                                           
-    
-      public void EcallMeasureHotOcallsPerformance([user_check] uint64_t*     performanceCounters, 
-                                                                uint64_t      numRepeats,
-                                                   [user_check] HotCall*      hotOcall );
+    	public void EcallStartResponder( [user_check] HotCall* fastEcall, [user_check] CheckIsDone* checkIsDone );                                                                                           
 
-      public void MyCustomEcall( [user_check] void* data );
+      public void EcallCopyDataToUntrustedLand([user_check] HotCall*  hotOcall);
 
-      public void EcallMeasureSDKOcallsPerformance([user_check] uint64_t*     performanceCounters, 
-                                                                uint64_t      numRepeats,
-                                                   [user_check] OcallParams*  ocallParams );
+      public void EcallCopyDataToUntrustedLand2([user_check] HotCall* hotOcall);    
 
-      public void EcallCopyDataToUntrustedLand([user_check] HotCall*  hotOcall);                                             
+      public void EcallCopyDataToUntrustedLand3([user_check] HotCall* hotOcall);                                             
     };
     untrusted {
-        void MyCustomOcall( [user_check] void* data );
-
         void ocall_print_string([in, string] const char *str);
-
-        void LowerEmDown([user_check] void* data);
     };
 
 };

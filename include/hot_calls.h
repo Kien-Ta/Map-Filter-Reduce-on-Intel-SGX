@@ -32,19 +32,24 @@
 #include <stdbool.h>
 // #include "utils.h"
 
+#include <unistd.h>
+//#include <string.h>
+//#include <cstring>
 
 #pragma GCC diagnostic ignored "-Wunused-function"
+
+#define MAX_SIZE 500
 
 typedef unsigned long int pthread_t;
 
 typedef struct {
-    pthread_t       responderThread;
+    //pthread_t       responderThread;
     sgx_spinlock_t  spinlock;
     void*           data;
     uint16_t        callID;
     bool            keepPolling;
-    bool            runFunction;
-    bool            isDone;
+    //bool            runFunction;
+    //bool            isDone;
     bool            busy;
 } HotCall;
 
@@ -54,18 +59,36 @@ typedef struct
     void (**callbacks)(void*);
 } HotCallTable;
 
-#define HOTCALL_INITIALIZER  {0, SGX_SPINLOCK_INITIALIZER, NULL, 0, true, false, false, false }
+typedef struct {
+    sgx_spinlock_t  spinlock;
+    bool            keepPolling;
+} CheckIsDone;
+
+typedef struct {
+    HotCall*        hotCall;
+    CheckIsDone*    checkIsDone;
+} PassToThread;
+
+//#define HOTCALL_INITIALIZER  {0, SGX_SPINLOCK_INITIALIZER, NULL, 0, true, false, false, false }
+//#define HOTCALL_INITIALIZER  {SGX_SPINLOCK_INITIALIZER, NULL, 0, true, false, false, false }
+#define HOTCALL_INITIALIZER  {SGX_SPINLOCK_INITIALIZER, NULL, 0, true, false}
 
 static void HotCall_init( HotCall* hotCall )
 {
-    hotCall->responderThread    = 0;
+    //hotCall->responderThread    = 0;
     hotCall->spinlock           = SGX_SPINLOCK_INITIALIZER;
     hotCall->data               = NULL; 
     hotCall->callID             = 0;
     hotCall->keepPolling        = true;
-    hotCall->runFunction        = false;
-    hotCall->isDone             = false;
+    //hotCall->runFunction        = false;
+    //hotCall->isDone             = false;
     hotCall->busy               = false;
+}
+
+static void CheckIsDone_init( CheckIsDone* checkIsDone)
+{
+    checkIsDone->spinlock       = SGX_SPINLOCK_INITIALIZER;
+    checkIsDone->keepPolling    = true;
 }
 
 static inline void _mm_pause(void) __attribute__((always_inline));
@@ -77,75 +100,209 @@ static inline void _mm_pause(void)
 }
 
 
-static inline int HotCall_requestCall( HotCall* hotCall, uint16_t callID, void *data )
+static inline int HotCall_requestCall( HotCall* hotCall, uint16_t callID, void **data, int index )
 {
     int i = 0;
-    const uint32_t MAX_RETRIES = 10;
+    const uint32_t MAX_RETRIES = 200;
     uint32_t numRetries = 0;
     //REquest call
     while( true ) {
-        sgx_spin_lock( &hotCall->spinlock );
-        if( hotCall->busy == false ) {
-            hotCall->busy        = true;
-            hotCall->isDone      = false;
-            hotCall->runFunction = true;
-            hotCall->callID      = callID;
-            hotCall->data        = data;
-            sgx_spin_unlock( &hotCall->spinlock );
+        sgx_spin_lock( &(hotCall[index].spinlock) );
+        if( hotCall[index].busy == false && hotCall[index].data == NULL) {
+            hotCall[index].busy        = true;
+            //hotCall[index].isDone      = false;
+            //hotCall[index].runFunction = true;
+            hotCall[index].callID      = callID;
+            hotCall[index].data        = data[index];
+            sgx_spin_unlock( &(hotCall[index].spinlock) );
             break;
         }
         //else:
-        sgx_spin_unlock( &hotCall->spinlock );
-
+        sgx_spin_unlock( &(hotCall[index].spinlock) );
+        
         numRetries++;
-        if( numRetries > MAX_RETRIES )
-            return -1;
-
-        for( i = 0; i<3; ++i)
+        //if( numRetries > MAX_RETRIES )
+        //    return -1;
+        
+        for( i = 0; i<10; ++i)
             _mm_pause();
     }
 
     //wait for answer
+    /*
     while( true )
     {
-        sgx_spin_lock( &hotCall->spinlock );
-        if( hotCall->isDone == true ){
-            hotCall->busy = false;
-            sgx_spin_unlock( &hotCall->spinlock );
+        sgx_spin_lock( &(hotCall[index].spinlock) );
+        if( hotCall[index].isDone == true ){
+            hotCall[index].busy = false;
+            sgx_spin_unlock( &(hotCall[index].spinlock) );
             break;
         }
 
-        sgx_spin_unlock( &hotCall->spinlock );
+        sgx_spin_unlock( &(hotCall[index].spinlock) );
         for( i = 0; i<3; ++i)
+            _mm_pause();
+    }
+    */
+
+    
+    //usleep(5000);
+
+    //for(int j = 0; j<3; ++j)
+    //    _mm_pause();
+
+    return numRetries;
+}
+
+static inline int HotCall_requestCall_v2( HotCall* hotCall, uint16_t callID, void **dataArray, void *data, int index)
+{
+    int i = 0; 
+    const uint32_t MAX_RETRIES = 100;
+    uint32_t numRetries = 0;
+
+    while ( true )
+    {
+        sgx_spin_lock( &(hotCall[index].spinlock) );
+        if ( hotCall[index].busy == false && hotCall[index].data == NULL)
+        {
+            hotCall[index].busy         = true;
+            hotCall[index].callID       = callID;
+            
+            strncpy((char *)dataArray[index], (char *)data, strlen((char *)data) + 1);
+            hotCall[index].data         = dataArray[index];
+            sgx_spin_unlock( &(hotCall[index].spinlock) );
+            break;
+        }
+    
+        sgx_spin_unlock( &(hotCall[index].spinlock) );
+
+        numRetries++;
+        //if (numRetries > MAX_RETRIES)
+        //   return -1;
+
+        for ( i = 0; i < 10; i++)
             _mm_pause();
     }
 
     return numRetries;
 }
 
-static inline void HotCall_waitForCall( HotCall *hotCall, HotCallTable* callTable )  __attribute__((always_inline));
-static inline void HotCall_waitForCall( HotCall *hotCall, HotCallTable* callTable ) 
+static inline void HotCall_waitForCall( HotCall *hotCall, HotCallTable* callTable, CheckIsDone *checkIsDone )  __attribute__((always_inline));
+static inline void HotCall_waitForCall( HotCall *hotCall, HotCallTable* callTable, CheckIsDone *checkIsDone ) 
 {
     static int i;
+
+    int index = 0;
+    int empty = 0;
+    int numRetries = 0;
+
+    int countDown = MAX_SIZE;
+
     // volatile void *data;
     while( true )
     {
-        sgx_spin_lock( &hotCall->spinlock );
-        if( hotCall->keepPolling != true ) {
-            sgx_spin_unlock( &hotCall->spinlock );
-            break;
+        /*
+        sgx_spin_lock( &(hotCall[index].spinlock) );
+        
+        if( hotCall[index].keepPolling != true ) {
+            sgx_spin_unlock( &(hotCall[index].spinlock) );
+            empty++;
+            if (empty == MAX_SIZE)
+            {
+                break;
+            }
+            else
+            {
+                index = (index + 1) % MAX_SIZE;
+                continue;
+            }
         }
+        */
 
-        if( hotCall->runFunction )
+
+        // them mot shared struct cho requestCall va waitForCall
+        // co mot bien de xac dinh xem requestCall da goi xong hay chua
+        // neu goi xong waitForCall chi chay them dung max_size lan roi se dung
+
+        sgx_spin_lock( &checkIsDone->spinlock );
+        if( checkIsDone->keepPolling != true ) {
+            sgx_spin_unlock( &checkIsDone->spinlock );
+
+            if (countDown > 0)
+            {
+                countDown -= 1;
+            }
+            else
+            {
+                break;
+            }
+        }
+        sgx_spin_unlock( &checkIsDone->spinlock);
+
+        /*
+        for (int i = 0; i < MAX_SIZE; i++)
         {
-            volatile uint16_t callID = hotCall->callID;
-            void *data = hotCall->data;
-            sgx_spin_unlock( &hotCall->spinlock );
+            sgx_spin_lock( &(hotCall[i].spinlock) );
+            if (hotCall[i].keepPolling == false)
+            {
+                empty += 1;
+            }
+            sgx_spin_unlock( &(hotCall[i].spinlock) );
+            if (empty == MAX_SIZE)
+            {
+                //printf("finish checking\n");
+                return;
+            }
+            
+        }  
+        */    
+        /*
+        if ( hotCall[index].data == NULL)
+        {
+            sgx_spin_unlock( &(hotCall[index].spinlock) );
+            empty++;
+            if (empty == MAX_SIZE)
+            {
+                numRetries++;
+                if (numRetries == 10)
+                {
+                    for (int i = 0; i < MAX_SIZE; i++)
+                    {
+                        sgx_spin_lock( &(hotCall[i].spinlock) );
+                        hotCall[i].keepPolling = false;
+                        sgx_spin_unlock( &(hotCall[i].spinlock) );
+                    }
+                    break;
+                }
+                else 
+                {
+                    numRetries = 0;
+                    index = (index + 1) % MAX_SIZE;
+                    continue;
+                }
+            }
+            else
+            {
+                index = (index + 1) % MAX_SIZE;
+                continue;
+            }
+
+        }
+        */
+
+        sgx_spin_lock( &(hotCall[index].spinlock) );
+
+        if( hotCall[index].busy == true && hotCall[index].data != NULL)
+        {
+            volatile uint16_t callID = hotCall[index].callID;
+            void *data = hotCall[index].data;
+            sgx_spin_unlock( &(hotCall[index].spinlock) );
             if( callID < callTable->numEntries ) {
                 // printf( "Calling callback %d\n", callID );
                 callTable->callbacks[ callID ]( data );
+                //callTable->callbacks[ callID+1 ]( (void*)index );
             }
-            else {
+            else {  
                 // printf( "Invalid callID\n" );
                 // exit(42);
             }
@@ -153,29 +310,41 @@ static inline void HotCall_waitForCall( HotCall *hotCall, HotCallTable* callTabl
             // data = (int*)hotCall->data;
             // printf( "Enclave: Data is at %p\n", data );
             // *data += 1;
-            sgx_spin_lock( &hotCall->spinlock );
-            hotCall->isDone      = true;
-            hotCall->runFunction = false;
+            sgx_spin_lock( &(hotCall[index].spinlock) );
+            //hotCall[index].isDone      = true;
+            //hotCall[index].runFunction = false;
+            hotCall[index].busy        = false;
+            hotCall[index].data        = NULL;
         }
         
-        sgx_spin_unlock( &hotCall->spinlock );
+        sgx_spin_unlock( &(hotCall[index].spinlock) );
         for( i = 0; i<3; ++i)
             _mm_pause();
         
         // _mm_pause();
         //     _mm_pause();
         // _mm_pause();
+
+        index = (index + 1) % MAX_SIZE;
     }
 
 }
 static inline void StopResponder( HotCall *hotCall );
 static inline void StopResponder( HotCall *hotCall )
 {
-    sgx_spin_lock( &hotCall->spinlock );
-    hotCall->keepPolling = false;
-    sgx_spin_unlock( &hotCall->spinlock );
+    for (int i = 0; i < MAX_SIZE; i++)
+    {
+        sgx_spin_lock( &(hotCall[i].spinlock) );
+        hotCall[i].keepPolling = false;
+        sgx_spin_unlock( &(hotCall[i].spinlock) );
+    }
 }
 
-
+static inline void signalEnd ( CheckIsDone *checkIsDone)
+{
+    sgx_spin_lock( &checkIsDone->spinlock);
+    checkIsDone->keepPolling = false;
+    sgx_spin_unlock( &checkIsDone->spinlock);
+}
 
 #endif

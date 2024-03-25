@@ -68,8 +68,14 @@ struct Accumulator
 {
 	char uniqueCarrier[2048] = { 0 };
 	int count = 0;
-	float delay = 0;
+	int delay = 0;
     Accumulator* next = NULL;
+};
+
+struct SaveData
+{
+	char data[2048] = { 0 };
+	SaveData* next = NULL;
 };
 
 void printf(const char *fmt, ...);
@@ -80,6 +86,10 @@ bool Filter(Carrier carrierData);
 void Reduce(Carrier carrierData);
 void MapFilterReduce(void* data);
 
+void SingleMap(void* data);
+void SingleFilter(void* data);
+void SingleReduce(void* data);
+//void PrintResult();
 #if defined(__cplusplus)
 }
 #endif

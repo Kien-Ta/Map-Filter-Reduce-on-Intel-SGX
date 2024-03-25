@@ -71,22 +71,9 @@ Accumulator accumulatorWN, accumulatorOther;
 
 Accumulator* listAccumulator = NULL;
 
-void MyCustomEcall( void* data )
-{
-	int *counter = (int*)data;
-	*counter += 1;
-}
+SaveData* saveData = NULL;
 
-void CapitalEmAll(void* data)
-{
-	strlcpy(enclaveData, (char*)data, strlen((char*)data));
-
-	for (int i = 0; i < strlen(enclaveData); i++)
-	{
-		enclaveData[i] = toupper(enclaveData[i]);
-	}
-	printf("UPPERCASE: %s\n", &enclaveData);
-}
+int exceeded = 0;
 
 const char* getfield(char* line, int num)
 {
@@ -103,15 +90,14 @@ void Map(void* data)
 {
 	char enclaveData[2048] = { 0 };
 	char enclaveData2[2048] = { 0 };
-	strlcpy(enclaveData, (char*)data, strlen((char*)data));
-	strlcpy(enclaveData2, (char*)data, strlen((char*)data));
+	strlcpy(enclaveData, (char*)data, strlen((char*)data) + 1);
+	strlcpy(enclaveData2, (char*)data, strlen((char*)data) + 1);
 
 	const char* name = getfield(enclaveData, 9);
 	const char* delay = getfield(enclaveData2, 15);
 
-	strlcpy(carrierData.uniqueCarrier, name, sizeof(name));
-	carrierData.arrDelay = atof(delay);
-	
+	strlcpy(carrierData.uniqueCarrier, name, sizeof(name) - 1);
+	carrierData.arrDelay = atoi(delay);
 	
 }
 
@@ -178,33 +164,235 @@ void MapFilterReduce(void* data)
 	{
 		Reduce(carrierData);
 	}
+	/*
+	Accumulator* traversing = listAccumulator;
+	while (traversing != NULL)
+	{
+		printf("%s %d\n", traversing->uniqueCarrier, traversing->count);
+		traversing = traversing->next;
+	}
+	*/
 }
 
-void EcallStartResponder( HotCall* hotEcall )
+//char result[2048] = { 0 };
+
+void SingleMap(void* data)
 {
-	void (*callbacks[3])(void*);
-    callbacks[0] = MyCustomEcall;
-	callbacks[1] = CapitalEmAll;
-	callbacks[2] = MapFilterReduce;
+	//printf("[+] Enclave data: %s\n", data);
+
+	char result[2048] = { 0 };
+
+	char enclaveData1[2048] = { 0 };
+	char enclaveData2[2048] = { 0 };
+	strlcpy(enclaveData1, (char*)data, strlen((char*)data) + 1);
+	strlcpy(enclaveData2, (char*)data, strlen((char*)data) + 1);
+
+	const char* name = getfield(enclaveData1, 9);
+	const char* delay = getfield(enclaveData2, 15);
+
+	//char result[2048] = { 0 };
+	strlcpy(result, name, sizeof(name));
+	strncat(result, ",", 1);
+	strncat(result, delay, strlen(delay));
+
+	//printf("%s\n", result);
+
+	// write result to a csv file, ready to transfer to node running SingleFilter()
+	// enclave can't write ****, so try to save Map result to linked list 
+
+	SaveData* traversing = saveData;
+
+	if (traversing != NULL)
+	{
+		while (traversing->next != NULL)
+		{
+			traversing = traversing->next;
+		}
+
+		SaveData* newData = new SaveData;
+		strlcpy(newData->data, result, sizeof(result));
+		newData->next = NULL;
+
+		traversing->next = newData;
+	}
+	else
+	{
+		SaveData* newData = new SaveData;
+		strlcpy(newData->data, result, sizeof(result));
+		newData->next = NULL;
+
+		saveData = newData;
+	}
+
+	//SingleFilter(&result);
+}
+
+//int count = 0;
+
+void SingleFilter(void* data)
+{
+	//static int count = 0;
+	//count += 1;
+
+	char mapData1[2048] = { 0 };
+
+	strlcpy(mapData1, (char*)data, strlen((char*)data) + 1);
+
+	//const char* name = getfield(enclaveData1, 9);
+	const char* delay = getfield(mapData1, 2);
+	float arrDelay = atoi(delay);
+
+	if (arrDelay > 0)
+	{
+		//printf("%d\n", count);
+
+		// write data to a csv file, ready to transfer to node running SingleReduce()
+		// enclave can't write ****, so try to save Map result to linked list 
+
+		SaveData* traversing = saveData;
+
+		if (traversing != NULL)
+		{
+			while (traversing->next != NULL)
+			{
+				traversing = traversing->next;
+			}
+
+			SaveData* newData = new SaveData;
+			strlcpy(newData->data, (char *)data, sizeof((char *)data));
+			newData->next = NULL;
+
+			traversing->next = newData;
+		}
+		else
+		{
+			SaveData* newData = new SaveData;
+			strlcpy(newData->data, (char *)data, sizeof((char *)data));
+			newData->next = NULL;
+
+			saveData = newData;
+		}
+
+		//SingleReduce(&result);
+	}
+}
+
+void SingleReduce(void* data)
+{
+	char filterData1[2048] = { 0 };
+	char filterData2[2048] = { 0 };
+	strlcpy(filterData1, (char*)data, strlen((char*)data) + 1);
+	strlcpy(filterData2, (char*)data, strlen((char*)data) + 1);
+
+	const char* uniqueCarrier = getfield(filterData1, 1);
+	const char* delay = getfield(filterData2, 2);
+	float arrDelay = atoi(delay);
+
+	Accumulator* findie = listAccumulator;
+	bool find = false;
+	
+	if (findie != NULL)
+	{
+		while(1)
+		{
+			if (!strcmp(uniqueCarrier, findie->uniqueCarrier)) 
+			{
+				find = true;
+				break;
+			}
+			if (findie->next != NULL)
+			{
+				findie = findie->next;
+			}
+			else break;
+		}
+
+		if (find)
+		{
+			findie->count++;
+			findie->delay += arrDelay;
+		}
+		else
+		{
+			Accumulator* newCarrier = new Accumulator;
+			strlcpy(newCarrier->uniqueCarrier, uniqueCarrier, sizeof(uniqueCarrier));
+			newCarrier->count++;
+			newCarrier->delay += arrDelay;
+			findie->next = newCarrier;
+		}
+	}
+	else
+	{
+		Accumulator* newCarrier = new Accumulator;
+		strlcpy(newCarrier->uniqueCarrier, uniqueCarrier, sizeof(uniqueCarrier));
+		newCarrier->count++;
+		newCarrier->delay += arrDelay;
+		listAccumulator = newCarrier;
+	}
+
+	// finish Reduce process, wait for untrusted section to retrieve data
+	// write another Ecall to transform Accumulator structure information to char array
+
+	//PrintResult();
+}
+/*
+void PrintResult()
+{
+	Accumulator* traversing = listAccumulator;
+
+	while (traversing != NULL)
+	{
+		printf("%d %s delayed carriers: total delayed time %f\n", traversing->count, traversing->uniqueCarrier, traversing->delay);
+
+		traversing = traversing->next;	
+	}
+	
+	traversing = NULL;
+}
+*/
+
+void EcallStartResponder( HotCall* hotEcall, CheckIsDone* checkIsDone )
+{
+	void (*callbacks[4])(void*);
+	callbacks[0] = MapFilterReduce;
+	callbacks[1] = SingleMap;
+	callbacks[2] = SingleFilter;
+	callbacks[3] = SingleReduce;
 
     HotCallTable callTable;
-    callTable.numEntries = 3;
+    callTable.numEntries = 4;
     callTable.callbacks  = callbacks;
 
-    HotCall_waitForCall( hotEcall, &callTable );
+    HotCall_waitForCall( hotEcall, &callTable, checkIsDone );
+
+	printf("Enclave out\n");
 }
 
 void EcallCopyDataToUntrustedLand(HotCall*	hotOcall)
 {
-	const uint16_t requestedCallID = 2;
+	const uint16_t requestedCallID = 0;
 
 	Accumulator* traversing = listAccumulator;
+	Accumulator* listAccu[MAX_SIZE];
+
+	int index = 0;
 
 	while(traversing != NULL)
 	{
-		HotCall_requestCall(hotOcall, requestedCallID, (void *)traversing);
+		listAccu[index] = traversing;
+
+		int noti = HotCall_requestCall(hotOcall, requestedCallID, (void **)listAccu, index);
+		if (noti == -1)
+		{
+			//printf("Enclave: Exceeded retry attempts\n");
+			exceeded += 1;
+		}
 		traversing = traversing->next;
+
+		index = (index + 1) % MAX_SIZE;
 	}
+
+	//signalEnd( checkIsDone );
 
 	Accumulator* deleting = listAccumulator;
 	traversing = listAccumulator;
@@ -217,52 +405,152 @@ void EcallCopyDataToUntrustedLand(HotCall*	hotOcall)
 	}
 
 	traversing = deleting = NULL;
+
+	printf("[+] Enclave: %d attemps exceeded retry limits\n", exceeded);
 }
 
-void EcallMeasureHotOcallsPerformance( uint64_t*     performanceCounters, 
-                                       uint64_t      numRepeats,
-                                       HotCall*      hotOcall )
+void ChangeIntToCharArray(int num, char* dst)
 {
-	printf( "Running %s\n", __func__ );
+	char temp[2048] = { 0 };
+	int index = 0;
+	while(num)
+	{
+		int spare = num % 10;
+		
+		temp[index] = spare + 48;
+		index += 1;
 
-	int         expectedData = 1;
-	OcallParams *ocallParams = (OcallParams *)hotOcall->data;
-	ocallParams->cyclesCount = &performanceCounters[ 0 ];
-
-	const uint16_t requestedCallID = 0;
-	HotCall_requestCall( hotOcall, requestedCallID, ocallParams ); //Setup startTime to current rdtscp()
-	for( uint64_t i=0; i < numRepeats; ++i ) {
-		ocallParams->cyclesCount = &performanceCounters[ i ];
-		HotCall_requestCall( hotOcall, requestedCallID, ocallParams );
-
-		expectedData++;
-        if( ocallParams->counter != expectedData ){
-            printf( "Error! ocallParams->counter is different than expected: %d != %d\n", ocallParams->counter, expectedData );
-        }
+		num = num / 10;
 	}
+
+	for (int i = 0; i < index; i++)
+	{
+		//printf("%s", temp[index - 1]);
+		dst[i] = temp[index - 1 - i];
+	}
+
+	dst[index] = '\0';
 }
 
-void EcallMeasureSDKOcallsPerformance( uint64_t*     performanceCounters, 
-                                       uint64_t      numRepeats,
-                                       OcallParams*  ocallParams )
+void EcallCopyDataToUntrustedLand2(HotCall* hotOcall)
 {
-	printf( "Running %s\n", __func__ );
+	const uint16_t requestedCallID = 1; // code them callID ben untrusted
 
-	int         expectedData = 1;
-	ocallParams->cyclesCount = &performanceCounters[ 0 ];
+	SaveData* traversing = saveData;
+	
+	char 		tempArray[2048];
+	char 		enclaveCharArray[MAX_SIZE][2048];
+	char*		pointerToEnclaveCharArray[MAX_SIZE];
 
-	const uint16_t requestedCallID = 0;
-	MyCustomOcall( ocallParams ); //Setup startTime to current rdtscp()
-	for( uint64_t i=0; i < numRepeats; ++i ) {
-		ocallParams->cyclesCount = &performanceCounters[ i ];
-		MyCustomOcall( ocallParams );
-
-		expectedData++;
-        if( ocallParams->counter != expectedData ){
-            printf( "Error! ocallParams->counter is different than expected: %d != %d\n", ocallParams->counter, expectedData );
-        }
+	for (int i = 0; i < MAX_SIZE; i++)
+	{
+		pointerToEnclaveCharArray[i] = enclaveCharArray[i];
 	}
+
+	int index = 0;
+
+	while (traversing != NULL)
+	{
+		strlcpy(tempArray, traversing->data, strlen(traversing->data) + 1);
+
+		int noti = HotCall_requestCall_v2(hotOcall, requestedCallID, (void **)pointerToEnclaveCharArray, (void *)tempArray, index);
+		if (noti == -1)
+		{
+			exceeded += 1;
+		}		
+
+		traversing = traversing->next;
+
+		//printf("[+] Enclave: %d\n", index);
+
+		index = (index + 1) % MAX_SIZE;
+	}
+
+	//signalEnd ( &checkIsDone );
+
+	SaveData* deleting = saveData;
+	traversing = saveData;
+
+	while (traversing != NULL)
+	{
+		deleting = traversing;
+		traversing = traversing->next;
+		delete deleting;
+	}
+
+	saveData = traversing = deleting = NULL;
+
+	printf("[+] Enclave: %d attempts exceeded retry limits\n", exceeded);
 }
+
+
+void EcallCopyDataToUntrustedLand3(HotCall* hotOcall)
+{
+	const uint16_t requestedCallID = 1; // code them callID ben untrusted
+
+	//SaveData* traversing = saveData;
+	Accumulator* traversing = listAccumulator;
+
+	char 		tempArray[2048];
+	char 		enclaveCharArray[MAX_SIZE][2048];
+	char*		pointerToEnclaveCharArray[MAX_SIZE];
+
+	char 		count[2048] = { 0 };
+	char 		delay[2048] = { 0 };
+
+	for (int i = 0; i < MAX_SIZE; i++)
+	{
+		pointerToEnclaveCharArray[i] = enclaveCharArray[i];
+	}
+
+	int index = 0;
+
+	while (traversing != NULL)
+	{
+		//strlcpy(tempArray, traversing->data, strlen(traversing->data) + 1);
+
+		strlcpy(tempArray, traversing->uniqueCarrier, strlen(traversing->uniqueCarrier) + 1);
+		strncat(tempArray, ": ", 2);
+
+		ChangeIntToCharArray(traversing->count, count);
+		ChangeIntToCharArray(traversing->delay, delay);
+
+		strncat(tempArray, count, sizeof(count));
+		strncat(tempArray, " carriers, total delay time ", 28);
+		strncat(tempArray, delay, sizeof(delay));		
+
+		// chuyen cai bien count va delay thay char array di, dai vl 
+		
+
+		int noti = HotCall_requestCall_v2(hotOcall, requestedCallID, (void **)pointerToEnclaveCharArray, (void *)tempArray, index);
+		if (noti == -1)
+		{
+			exceeded += 1;
+		}		
+
+		traversing = traversing->next;
+
+		index = (index + 1) % MAX_SIZE;
+	}
+
+	//signalEnd ( &checkIsDone );
+
+	Accumulator* deleting = listAccumulator;
+	traversing = listAccumulator;
+
+	while (traversing != NULL)
+	{
+		deleting = traversing;
+		traversing = traversing->next;
+		delete deleting;
+	}
+
+	listAccumulator = traversing = deleting = NULL;
+
+	printf("[+] Enclave: %d attempts exceeded retry limits\n", exceeded);
+}
+
+
 /* 
  * printf: 
  *   Invokes OCALL to display the enclave buffer to the terminal.

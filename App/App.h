@@ -82,7 +82,6 @@ extern sgx_enclave_id_t global_eid;    /* global enclave id */
 extern "C" {
 #endif
 
-
 #if defined(__cplusplus)
 }
 #endif
