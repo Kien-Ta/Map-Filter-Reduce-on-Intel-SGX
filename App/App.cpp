@@ -186,13 +186,6 @@ static sgx_errlist_t sgx_errlist[] = {
     },
 };
 
-struct Accumulator
-{
-	char uniqueCarrier[2048] = { 0 };
-	int count = 0;
-	float delay = 0;
-} accumulator;
-
 /* Check error conditions for loading enclave */
 void print_error_message(sgx_status_t ret)
 {
@@ -236,15 +229,6 @@ void* EnclaveResponderThread( void* passToThreadAsVoidP)
     return NULL;
 }
 
-void CopyData(void *data)
-{
-    strcpy(accumulator.uniqueCarrier, ((Accumulator*)data)->uniqueCarrier);
-    accumulator.count = ((Accumulator*)data)->count;
-    accumulator.delay = ((Accumulator*)data)->delay;
-
-    printf("%d carrier %s total delay time: %f\n",accumulator.count, accumulator.uniqueCarrier, accumulator.delay);
-}
-
 int callID = 0;
 
 void WriteDataToCSV(void* data)
@@ -252,17 +236,15 @@ void WriteDataToCSV(void* data)
     char filename[64] = { 0 };
     switch (callID)
     {
-    case 1:
-    case 4:
+    case 0:
         strcpy(filename, "MapResult.csv");
         break;
 
-    case 2:
-    case 5:
+    case 1:
         strcpy(filename, "FilterResult.csv");
         break;
     
-    case 3:
+    case 2:
         strcpy(filename, "ReduceResult.txt");
         break;
 
@@ -283,12 +265,11 @@ void WriteDataToCSV(void* data)
 
 void* OcallResponderThread( void* passToThreadAsVoidP)
 {
-    void (*callbacks[2])(void*);   
-    callbacks[0] = CopyData;
-    callbacks[1] = WriteDataToCSV;
+    void (*callbacks[1])(void*);   
+    callbacks[0] = WriteDataToCSV;
 
     HotCallTable callTable;
-    callTable.numEntries = 2;
+    callTable.numEntries = 1;
     callTable.callbacks  = callbacks;
 
     PassToThread* argPass = (PassToThread*)passToThreadAsVoidP;
@@ -309,7 +290,7 @@ pthread_t testThread1 = 0, testThread2 = 0, testThread3 = 0;
 
 class HotCallsTesterError {};
 
-pthread_t thread1 = 0, thread2 = 0;
+//pthread_t thread1 = 0, thread2 = 0;
 
 int exceeded = 0;
 
@@ -336,7 +317,7 @@ public:
 
     void Run( void ) 
     {
-        callID = 3;
+        callID = 2;
 
         uint64_t    startTime       = 0;
         uint64_t    endTime         = 0;
@@ -346,21 +327,18 @@ public:
         // fun code, might remove later
         switch (callID)
         {
-        case 1:
-        case 4:
-            strcpy(filename, "2008.csv");
+        case 0:
+            strcpy(filename, "200823.csv");
             break;
 
-        case 2:
-        case 5:
+        case 1:
             strcpy(filename, "MapResult.csv");
             break;
 
-        case 3:
+        case 2:
             strcpy(filename, "FilterResult.csv");
             break;
 
-        
         default:
             printf("WHAET? Commando no understando...\n");
             exit(-1);
@@ -368,11 +346,7 @@ public:
         
         startTime = rdtscp();
 
-        CallEnclaveToDoYourBidding(filename, callID);
-        
-        //RetrieveResultFromEnclave();
-
-        //StillCallEnclaveButWithMultithreading(filename, callID);
+        CallEnclaveDoEverything(filename, callID);
 
         endTime = rdtscp();
 
@@ -380,124 +354,8 @@ public:
         printf("[+] Untrusted: %d attempts exceeded retry limits\n", exceeded);
     }
 
-    void CallEnclaveToDoYourBidding(const char* filename, const uint16_t requestedCallID)
-    {
-        string untrustedString;
 
-        char        tempArray[2048];
-        char        untrustedCharArray[MAX_SIZE][2048];
-        char*       pointerToUntrustedCharArray[MAX_SIZE];
-
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            pointerToUntrustedCharArray[i] = untrustedCharArray[i];
-        }
-
-        HotCall     hotEcall[MAX_SIZE];
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            HotCall_init(&hotEcall[i]);
-        }
-
-        CheckIsDone checkIsDone;
-        CheckIsDone_init(&checkIsDone);
-        // tien hanh trien khai checkIsDone vao requestCall va waitForCall
-
-        PassToThread passToThread;
-        passToThread.hotCall = hotEcall;
-        passToThread.checkIsDone = &checkIsDone;
-
-        int index = 0;
-        
-        printf("%s\n", filename);
-
-        fstream fin;
-        fin.open(filename, ios::in);
-
-        globalEnclaveID = m_enclaveID;
-
-        //pthread_create(&hotEcall.responderThread, NULL, EnclaveResponderThread, (void*)&hotEcall);
-        //pthread_create(&thread1, NULL, EnclaveResponderThread, (void*)hotEcall);
-
-        int notiThread = pthread_create(&thread1, NULL, EnclaveResponderThread, (void*)&passToThread);
-        if (notiThread != 0)
-        {
-            printf("SKYFALLLLLLLLLLLLLL!!!!!!!!!!!!!\n");
-            exit(-1);
-        }
-
-        //int test = 0;
-
-        while (getline(fin, untrustedString))
-        {
-            strcpy(tempArray, untrustedString.c_str());
-
-            int noti = HotCall_requestCall_v2(hotEcall, requestedCallID, (void **)pointerToUntrustedCharArray, (void *)tempArray, index);
-
-            if (noti == -1)
-            {
-                exceeded += 1;
-            }
-
-            //printf("[+] Untrusted: %d\n", test);
-            //test = test + 1;
-
-            index = (index + 1) % MAX_SIZE;
-        }
-
-        fin.close();
-
-        signalEnd( &checkIsDone );
-
-        pthread_join(thread1, NULL);
-
-        this->RetrieveResultFromEnclave();
-
-        //sleep(5);
-        //StopResponder(hotEcall);
-    }
-   
-    void RetrieveResultFromEnclave()
-    {
-        HotCall hotOcall[MAX_SIZE];
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            HotCall_init(&hotOcall[i]);
-        }
-
-        CheckIsDone checkIsDone;
-        CheckIsDone_init(&checkIsDone);
-
-        PassToThread passToThread;
-        passToThread.hotCall = hotOcall;
-        passToThread.checkIsDone = &checkIsDone;
-
-        //pthread_create(&thread2, NULL, OcallResponderThread, (void*)hotOcall);
-        int notiThread = pthread_create(&thread2, NULL, OcallResponderThread, (void*)&passToThread);
-        if (notiThread != 0)
-        {
-            printf("SKYFALLLLLLLLLLLLLL!!!!!!!!!!!!!\n");
-            exit(-1);   
-        }
-
-        if (callID != 3)
-        {
-            EcallCopyDataToUntrustedLand2(m_enclaveID, hotOcall);
-        }
-        else
-        {
-            EcallCopyDataToUntrustedLand3(m_enclaveID, hotOcall);
-        }
-
-        signalEnd( &checkIsDone );
-
-        pthread_join(thread2, NULL);
-
-        //sleep(10);
-        //StopResponder(hotOcall);
-    }
-
-    void StillCallEnclaveButWithMultithreading(const char* filename, const uint16_t requestedCallID)
+    void CallEnclaveDoEverything(const char* filename, const uint16_t requestedCallID)
     {
         string      untrustedString;
 
@@ -522,9 +380,8 @@ public:
         passToThread.checkIsDone    = &checkIsDone;
 
         int index = 0;
-        //int countingDown = 0;
 
-        printf("%s\n", filename);
+        //printf("%s\n", filename);
 
         fstream fin;
         fin.open(filename, ios::in);
@@ -538,11 +395,15 @@ public:
             exit(-1);
         }
 
-        int notiThread2 = pthread_create(&testThread2, NULL, StillRetrieveResultButSpawnedFromCall, NULL);
-        if (notiThread2 != 0)
+        if (requestedCallID != 2)
         {
-            printf("No Thread?\n");
-            exit(-1);
+            // operator thuc hien dong thoi voi qua trinh thu nhan ket qua 
+            int notiThread2 = pthread_create(&testThread2, NULL, StillRetrieveResultButSpawnedFromCall, NULL);
+            if (notiThread2 != 0)
+            {
+                printf("No Thread?\n");
+                exit(-1);
+            }
         }
 
         while (getline(fin, untrustedString))
@@ -566,10 +427,53 @@ public:
         signalEnd( &checkIsDone );
 
         pthread_join(testThread1, NULL);
-        pthread_join(testThread2, NULL);
-        pthread_join(testThread3, NULL);
+
+        if (requestedCallID != 2)
+        {
+            pthread_join(testThread2, NULL);
+            //pthread_join(testThread3, NULL);
+        }
+        else
+        {
+            // mot so operator phai xu ly xong toan bo du lieu moi thu duoc ket qua 
+            // hien tai: Reduce
+            this->RetrieveResultFromEnclave();
+        }
     }
 
+    void RetrieveResultFromEnclave()
+    {
+        HotCall hotOcall[MAX_SIZE];
+        for (int i = 0; i < MAX_SIZE; i++)
+        {
+            HotCall_init(&hotOcall[i]);
+        }
+
+        CheckIsDone checkIsDone;
+        CheckIsDone_init(&checkIsDone);
+
+        PassToThread passToThread;
+        passToThread.hotCall = hotOcall;
+        passToThread.checkIsDone = &checkIsDone;
+
+        //pthread_create(&thread2, NULL, OcallResponderThread, (void*)hotOcall);
+        int notiThread = pthread_create(&testThread3, NULL, OcallResponderThread, (void*)&passToThread);
+        if (notiThread != 0)
+        {
+            printf("SKYFALLLLLLLLLLLLLL!!!!!!!!!!!!!\n");
+            exit(-1);   
+        }
+
+
+        EcallCopyDataNoMultithread(m_enclaveID, hotOcall);
+
+        signalEnd( &checkIsDone );
+
+        pthread_join(testThread3, NULL);
+
+        //sleep(10);
+        //StopResponder(hotOcall);
+    }
 
     static void* StillRetrieveResultButSpawnedFromCall(void* lorenIpsum)
     {
@@ -594,18 +498,7 @@ public:
             exit(-1);   
         }
 
-        if (callID != 3)
-        {
-            EcallCopyDataToUntrustedLand4(globalEnclaveID, hotOcall);
-            
-            // sum code goes here
-        }
-        else
-        {
-            //EcallCopyDataToUntrustedLand3(m_enclaveID, hotOcall);
-        
-            // TODO TODO TODO
-        }
+        EcallCopyDataWithMultithread(globalEnclaveID, hotOcall);
 
         signalEnd( &checkIsDone );
 
@@ -615,8 +508,6 @@ public:
 
         return NULL;
     }
-
-
 
 private:
     /* Global EID shared by multiple threads */

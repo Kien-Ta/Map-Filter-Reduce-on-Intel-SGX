@@ -63,11 +63,9 @@ enclave {
     trusted {
     	public void EcallStartResponder( [user_check] HotCall* fastEcall, [user_check] CheckIsDone* checkIsDone );                                                                                           
 
-      public void EcallCopyDataToUntrustedLand2([user_check] HotCall* hotOcall);    
+      public void EcallCopyDataNoMultithread([user_check] HotCall* hotOcall);
 
-      public void EcallCopyDataToUntrustedLand3([user_check] HotCall* hotOcall);
-
-      public void EcallCopyDataToUntrustedLand4([user_check] HotCall* hotOcall);                                               
+      public void EcallCopyDataWithMultithread([user_check] HotCall* hotOcall);                                               
     };
     untrusted {
         void ocall_print_string([in, string] const char *str);

@@ -99,61 +99,6 @@ static inline void _mm_pause(void)
     );
 }
 
-
-static inline int HotCall_requestCall( HotCall* hotCall, uint16_t callID, void **data, int index )
-{
-    int i = 0;
-    const uint32_t MAX_RETRIES = 200;
-    uint32_t numRetries = 0;
-    //REquest call
-    while( true ) {
-        sgx_spin_lock( &(hotCall[index].spinlock) );
-        if( hotCall[index].busy == false && hotCall[index].data == NULL) {
-            hotCall[index].busy        = true;
-            //hotCall[index].isDone      = false;
-            //hotCall[index].runFunction = true;
-            hotCall[index].callID      = callID;
-            hotCall[index].data        = data[index];
-            sgx_spin_unlock( &(hotCall[index].spinlock) );
-            break;
-        }
-        //else:
-        sgx_spin_unlock( &(hotCall[index].spinlock) );
-        
-        numRetries++;
-        //if( numRetries > MAX_RETRIES )
-        //    return -1;
-        
-        for( i = 0; i<10; ++i)
-            _mm_pause();
-    }
-
-    //wait for answer
-    /*
-    while( true )
-    {
-        sgx_spin_lock( &(hotCall[index].spinlock) );
-        if( hotCall[index].isDone == true ){
-            hotCall[index].busy = false;
-            sgx_spin_unlock( &(hotCall[index].spinlock) );
-            break;
-        }
-
-        sgx_spin_unlock( &(hotCall[index].spinlock) );
-        for( i = 0; i<3; ++i)
-            _mm_pause();
-    }
-    */
-
-    
-    //usleep(5000);
-
-    //for(int j = 0; j<3; ++j)
-    //    _mm_pause();
-
-    return numRetries;
-}
-
 static inline int HotCall_requestCall_v2( HotCall* hotCall, uint16_t callID, void **dataArray, void *data, int index)
 {
     int i = 0; 
@@ -201,25 +146,6 @@ static inline void HotCall_waitForCall( HotCall *hotCall, HotCallTable* callTabl
     // volatile void *data;
     while( true )
     {
-        /*
-        sgx_spin_lock( &(hotCall[index].spinlock) );
-        
-        if( hotCall[index].keepPolling != true ) {
-            sgx_spin_unlock( &(hotCall[index].spinlock) );
-            empty++;
-            if (empty == MAX_SIZE)
-            {
-                break;
-            }
-            else
-            {
-                index = (index + 1) % MAX_SIZE;
-                continue;
-            }
-        }
-        */
-
-
         // them mot shared struct cho requestCall va waitForCall
         // co mot bien de xac dinh xem requestCall da goi xong hay chua
         // neu goi xong waitForCall chi chay them dung max_size lan roi se dung
@@ -239,59 +165,8 @@ static inline void HotCall_waitForCall( HotCall *hotCall, HotCallTable* callTabl
         }
         sgx_spin_unlock( &checkIsDone->spinlock);
 
-        /*
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            sgx_spin_lock( &(hotCall[i].spinlock) );
-            if (hotCall[i].keepPolling == false)
-            {
-                empty += 1;
-            }
-            sgx_spin_unlock( &(hotCall[i].spinlock) );
-            if (empty == MAX_SIZE)
-            {
-                //printf("finish checking\n");
-                return;
-            }
-            
-        }  
-        */    
-        /*
-        if ( hotCall[index].data == NULL)
-        {
-            sgx_spin_unlock( &(hotCall[index].spinlock) );
-            empty++;
-            if (empty == MAX_SIZE)
-            {
-                numRetries++;
-                if (numRetries == 10)
-                {
-                    for (int i = 0; i < MAX_SIZE; i++)
-                    {
-                        sgx_spin_lock( &(hotCall[i].spinlock) );
-                        hotCall[i].keepPolling = false;
-                        sgx_spin_unlock( &(hotCall[i].spinlock) );
-                    }
-                    break;
-                }
-                else 
-                {
-                    numRetries = 0;
-                    index = (index + 1) % MAX_SIZE;
-                    continue;
-                }
-            }
-            else
-            {
-                index = (index + 1) % MAX_SIZE;
-                continue;
-            }
-
-        }
-        */
 
         sgx_spin_lock( &(hotCall[index].spinlock) );
-
         if( hotCall[index].busy == true && hotCall[index].data != NULL)
         {
             volatile uint16_t callID = hotCall[index].callID;

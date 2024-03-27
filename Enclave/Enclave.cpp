@@ -66,12 +66,7 @@
 
 char enclaveData[2048] = { 0 };
 
-Carrier carrierData;
-Accumulator accumulatorWN, accumulatorOther;
-
 Accumulator* listAccumulator = NULL;
-
-SaveData* saveData = NULL;
 
 int exceeded = 0;
 
@@ -86,90 +81,16 @@ const char* getfield(char* line, int num)
     return NULL;
 }
 
-void Map(void* data)
+struct TestData
 {
-	char enclaveData[2048] = { 0 };
-	char enclaveData2[2048] = { 0 };
-	strlcpy(enclaveData, (char*)data, strlen((char*)data) + 1);
-	strlcpy(enclaveData2, (char*)data, strlen((char*)data) + 1);
-
-	const char* name = getfield(enclaveData, 9);
-	const char* delay = getfield(enclaveData2, 15);
-
-	strlcpy(carrierData.uniqueCarrier, name, sizeof(name) - 1);
-	carrierData.arrDelay = atoi(delay);
-	
-}
-
-bool Filter(Carrier carrierData)
-{
-	if(carrierData.arrDelay > 0)
-	{
-		return true;
-	}
-	else return false;
-}
-
-void Reduce(Carrier carrierData)
-{
-	
-	Accumulator* findie = listAccumulator;
-	bool find = false;
-	
-	if (findie != NULL)
-	{
-		while(1)
-		{
-			if (!strcmp(carrierData.uniqueCarrier, findie->uniqueCarrier)) 
-			{
-				find = true;
-				break;
-			}
-			if (findie->next != NULL)
-			{
-				findie = findie->next;
-			}
-			else break;
-		}
-
-		if (find)
-		{
-			findie->count++;
-			findie->delay += carrierData.arrDelay;
-		}
-		else
-		{
-			Accumulator* newCarrier = new Accumulator;
-			strlcpy(newCarrier->uniqueCarrier, carrierData.uniqueCarrier, sizeof(carrierData.uniqueCarrier));
-			newCarrier->count++;
-			newCarrier->delay += carrierData.arrDelay;
-			findie->next = newCarrier;
-		}
-	}
-	else
-	{
-		Accumulator* newCarrier = new Accumulator;
-		strlcpy(newCarrier->uniqueCarrier, carrierData.uniqueCarrier, sizeof(carrierData.uniqueCarrier));
-		newCarrier->count++;
-		newCarrier->delay += carrierData.arrDelay;
-		listAccumulator = newCarrier;
-	}
-
-}
-
-void MapFilterReduce(void* data)
-{
-	Map(data);
-	if(Filter(carrierData))
-	{
-		Reduce(carrierData);
-	}
-	
-}
+	sgx_spinlock_t 	spinlock 	= SGX_SPINLOCK_INITIALIZER;
+	char			data[2048]	= { 0 };
+};
+TestData testData[MAX_SIZE];
 
 void SingleMap(void* data)
 {
-	//printf("[+] Enclave data: %s\n", data);
+	static int indexTestData = 0;
 
 	char result[2048] = { 0 };
 
@@ -181,84 +102,56 @@ void SingleMap(void* data)
 	const char* name = getfield(enclaveData1, 9);
 	const char* delay = getfield(enclaveData2, 15);
 
+	//char result[2048] = { 0 };
 	strlcpy(result, name, sizeof(name));
 	strncat(result, ",", 1);
 	strncat(result, delay, strlen(delay));
 
-	//printf("%s\n", result);
-
-	// write result to a csv file, ready to transfer to node running SingleFilter()
-
-	SaveData* traversing = saveData;
-
-	if (traversing != NULL)
+	while (1)
 	{
-		while (traversing->next != NULL)
+		sgx_spin_lock( &(testData[indexTestData].spinlock) );
+		if (testData[indexTestData].data[0] == '\0')
 		{
-			traversing = traversing->next;
+			strlcpy(testData[indexTestData].data, result, sizeof(result));
+			sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+			indexTestData = (indexTestData + 1) % MAX_SIZE;
+			break;
 		}
-
-		SaveData* newData = new SaveData;
-		strlcpy(newData->data, result, sizeof(result));
-		newData->next = NULL;
-
-		traversing->next = newData;
-	}
-	else
-	{
-		SaveData* newData = new SaveData;
-		strlcpy(newData->data, result, sizeof(result));
-		newData->next = NULL;
-
-		saveData = newData;
+		sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+		indexTestData = (indexTestData + 1) % MAX_SIZE;
 	}
 
-	//SingleFilter(&result);
 }
 
 void SingleFilter(void* data)
 {
-	char mapData1[2048] = { 0 };
+	static int indexTestData = 0;
 
-	strlcpy(mapData1, (char*)data, strlen((char*)data) + 1);
+	char mapData[2048] = { 0 };
 
-	//const char* name = getfield(enclaveData1, 9);
-	const char* delay = getfield(mapData1, 2);
+	strlcpy(mapData, (char*)data, strlen((char*)data) + 1);
+
+	const char* delay = getfield(mapData, 2);
 	int arrDelay = atoi(delay);
 
 	if (arrDelay > 0)
 	{
-		//printf("%d\n", count);
-
-		// write data to a csv file, ready to transfer to node running SingleReduce()
-
-		SaveData* traversing = saveData;
-
-		if (traversing != NULL)
+		while (1)
 		{
-			while (traversing->next != NULL)
+			sgx_spin_lock( &(testData[indexTestData].spinlock) );
+			if (testData[indexTestData].data[0] == '\0')
 			{
-				traversing = traversing->next;
+				strlcpy(testData[indexTestData].data, (char*)data, sizeof((char*)data));
+				sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+				indexTestData = (indexTestData + 1) % MAX_SIZE;
+				break;
 			}
-
-			SaveData* newData = new SaveData;
-			strlcpy(newData->data, (char *)data, sizeof((char *)data));
-			newData->next = NULL;
-
-			traversing->next = newData;
-		}
-		else
-		{
-			SaveData* newData = new SaveData;
-			strlcpy(newData->data, (char *)data, sizeof((char *)data));
-			newData->next = NULL;
-
-			saveData = newData;
-		}
-
-		//SingleReduce(&result);
+			sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+			indexTestData = (indexTestData + 1) % MAX_SIZE;
+		}	
 	}
 }
+
 
 void SingleReduce(void* data)
 {
@@ -318,87 +211,6 @@ void SingleReduce(void* data)
 
 }
 
-struct TestData
-{
-	sgx_spinlock_t 	spinlock 	= SGX_SPINLOCK_INITIALIZER;
-	char			data[2048]	= { 0 };
-};
-TestData testData[MAX_SIZE];
-
-//int indexTestData = 0;
-
-void TestMap(void* data)
-{
-	static int indexTestData = 0;
-
-	char result[2048] = { 0 };
-
-	char enclaveData1[2048] = { 0 };
-	char enclaveData2[2048] = { 0 };
-	strlcpy(enclaveData1, (char*)data, strlen((char*)data) + 1);
-	strlcpy(enclaveData2, (char*)data, strlen((char*)data) + 1);
-
-	const char* name = getfield(enclaveData1, 9);
-	const char* delay = getfield(enclaveData2, 15);
-
-	//char result[2048] = { 0 };
-	strlcpy(result, name, sizeof(name));
-	strncat(result, ",", 1);
-	strncat(result, delay, strlen(delay));
-
-	while (1)
-	{
-		sgx_spin_lock( &(testData[indexTestData].spinlock) );
-		if (testData[indexTestData].data[0] == '\0')
-		{
-			strlcpy(testData[indexTestData].data, result, sizeof(result));
-			sgx_spin_unlock( &(testData[indexTestData].spinlock) );
-			indexTestData = (indexTestData + 1) % MAX_SIZE;
-			break;
-		}
-		sgx_spin_unlock( &(testData[indexTestData].spinlock) );
-		indexTestData = (indexTestData + 1) % MAX_SIZE;
-	}
-
-}
-
-void TestFilter(void* data)
-{
-	//printf("%s\n", (char*)data);
-
-	static int indexTestData = 0;
-
-	char mapData[2048] = { 0 };
-
-	strlcpy(mapData, (char*)data, strlen((char*)data) + 1);
-
-	const char* delay = getfield(mapData, 2);
-	int arrDelay = atoi(delay);
-
-	if (arrDelay > 0)
-	{
-		while (1)
-		{
-			sgx_spin_lock( &(testData[indexTestData].spinlock) );
-			if (testData[indexTestData].data[0] == '\0')
-			{
-				strlcpy(testData[indexTestData].data, (char*)data, sizeof((char*)data));
-				sgx_spin_unlock( &(testData[indexTestData].spinlock) );
-				indexTestData = (indexTestData + 1) % MAX_SIZE;
-				break;
-			}
-			sgx_spin_unlock( &(testData[indexTestData].spinlock) );
-			indexTestData = (indexTestData + 1) % MAX_SIZE;
-		}	
-	}
-}
-
-void TestReduce(void* data)
-{
-	// not sure if we can optimize SingleReduce() more
-}
-
-
 struct DoneProcessing
 {
 	sgx_spinlock_t	spinlock;
@@ -408,17 +220,13 @@ DoneProcessing doneProcessing;
 
 void EcallStartResponder( HotCall* hotEcall, CheckIsDone* checkIsDone )
 {
-	void (*callbacks[7])(void*);
-	callbacks[0] = MapFilterReduce;
-	callbacks[1] = SingleMap;
-	callbacks[2] = SingleFilter;
-	callbacks[3] = SingleReduce;
-	callbacks[4] = TestMap;
-	callbacks[5] = TestFilter;
-	callbacks[6] = TestReduce;
+	void (*callbacks[3])(void*);
+	callbacks[0] = SingleMap;
+	callbacks[1] = SingleFilter;
+	callbacks[2] = SingleReduce;
 
     HotCallTable callTable;
-    callTable.numEntries = 7;
+    callTable.numEntries = 3;
     callTable.callbacks  = callbacks;
 
     HotCall_waitForCall( hotEcall, &callTable, checkIsDone );
@@ -453,60 +261,9 @@ void ChangeIntToCharArray(int num, char* dst)
 	dst[index] = '\0';
 }
 
-void EcallCopyDataToUntrustedLand2(HotCall* hotOcall)
+void EcallCopyDataNoMultithread(HotCall* hotOcall)
 {
-	const uint16_t requestedCallID = 1; // code them callID ben untrusted
-
-	SaveData* traversing = saveData;
-	
-	char 		tempArray[2048];
-	char 		enclaveCharArray[MAX_SIZE][2048];
-	char*		pointerToEnclaveCharArray[MAX_SIZE];
-
-	for (int i = 0; i < MAX_SIZE; i++)
-	{
-		pointerToEnclaveCharArray[i] = enclaveCharArray[i];
-	}
-
-	int index = 0;
-
-	while (traversing != NULL)
-	{
-		strlcpy(tempArray, traversing->data, strlen(traversing->data) + 1);
-
-		int noti = HotCall_requestCall_v2(hotOcall, requestedCallID, (void **)pointerToEnclaveCharArray, (void *)tempArray, index);
-		if (noti == -1)
-		{
-			exceeded += 1;
-		}		
-
-		traversing = traversing->next;
-
-		//printf("[+] Enclave: %d\n", index);
-
-		index = (index + 1) % MAX_SIZE;
-	}
-
-	//signalEnd ( &checkIsDone );
-
-	SaveData* deleting = saveData;
-	traversing = saveData;
-
-	while (traversing != NULL)
-	{
-		deleting = traversing;
-		traversing = traversing->next;
-		delete deleting;
-	}
-
-	saveData = traversing = deleting = NULL;
-
-	printf("[+] Enclave: %d attempts exceeded retry limits\n", exceeded);
-}
-
-void EcallCopyDataToUntrustedLand3(HotCall* hotOcall)
-{
-	const uint16_t requestedCallID = 1; // code them callID ben untrusted
+	const uint16_t requestedCallID = 0; // code them callID ben untrusted
 
 	//SaveData* traversing = saveData;
 	Accumulator* traversing = listAccumulator;
@@ -539,9 +296,6 @@ void EcallCopyDataToUntrustedLand3(HotCall* hotOcall)
 		strncat(tempArray, " carriers, total delay time ", 28);
 		strncat(tempArray, delay, sizeof(delay));		
 
-		// chuyen cai bien count va delay thay char array di, dai vl 
-		
-
 		int noti = HotCall_requestCall_v2(hotOcall, requestedCallID, (void **)pointerToEnclaveCharArray, (void *)tempArray, index);
 		if (noti == -1)
 		{
@@ -552,8 +306,6 @@ void EcallCopyDataToUntrustedLand3(HotCall* hotOcall)
 
 		index = (index + 1) % MAX_SIZE;
 	}
-
-	//signalEnd ( &checkIsDone );
 
 	Accumulator* deleting = listAccumulator;
 	traversing = listAccumulator;
@@ -570,11 +322,11 @@ void EcallCopyDataToUntrustedLand3(HotCall* hotOcall)
 	printf("[+] Enclave: %d attempts exceeded retry limits\n", exceeded);
 }
 
-void EcallCopyDataToUntrustedLand4(HotCall* hotOcall)
+void EcallCopyDataWithMultithread(HotCall* hotOcall)
 {
 	static int indexWriteTestData = 0;
 
-	const uint16_t requestedCallID = 1;
+	const uint16_t requestedCallID = 0;
 
 	char 		tempArray[2048];
 	char 		enclaveCharArray[MAX_SIZE][2048];

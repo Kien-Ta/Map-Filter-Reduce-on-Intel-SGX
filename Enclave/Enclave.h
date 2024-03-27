@@ -58,12 +58,6 @@
 extern "C" {
 #endif
 
-struct Carrier
-{
-	char uniqueCarrier[2048] = { 0 };
-	float arrDelay = 0;
-};
-
 struct Accumulator
 {
 	char uniqueCarrier[2048] = { 0 };
@@ -72,27 +66,13 @@ struct Accumulator
     Accumulator* next = NULL;
 };
 
-struct SaveData
-{
-	char data[2048] = { 0 };
-	SaveData* next = NULL;
-};
-
 void printf(const char *fmt, ...);
 
 const char* getfield(char* line, int num);
-void Map(void* data);
-bool Filter(Carrier carrierData);
-void Reduce(Carrier carrierData);
-void MapFilterReduce(void* data);
 
 void SingleMap(void* data);
 void SingleFilter(void* data);
 void SingleReduce(void* data);
-
-void TestMap(void* data);
-void TestFilter(void* data);
-void TestReduce(void* data);
 
 #if defined(__cplusplus)
 }
