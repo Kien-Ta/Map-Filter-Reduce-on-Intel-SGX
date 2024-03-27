@@ -164,17 +164,8 @@ void MapFilterReduce(void* data)
 	{
 		Reduce(carrierData);
 	}
-	/*
-	Accumulator* traversing = listAccumulator;
-	while (traversing != NULL)
-	{
-		printf("%s %d\n", traversing->uniqueCarrier, traversing->count);
-		traversing = traversing->next;
-	}
-	*/
+	
 }
-
-//char result[2048] = { 0 };
 
 void SingleMap(void* data)
 {
@@ -190,7 +181,6 @@ void SingleMap(void* data)
 	const char* name = getfield(enclaveData1, 9);
 	const char* delay = getfield(enclaveData2, 15);
 
-	//char result[2048] = { 0 };
 	strlcpy(result, name, sizeof(name));
 	strncat(result, ",", 1);
 	strncat(result, delay, strlen(delay));
@@ -198,7 +188,6 @@ void SingleMap(void* data)
 	//printf("%s\n", result);
 
 	// write result to a csv file, ready to transfer to node running SingleFilter()
-	// enclave can't write ****, so try to save Map result to linked list 
 
 	SaveData* traversing = saveData;
 
@@ -227,27 +216,21 @@ void SingleMap(void* data)
 	//SingleFilter(&result);
 }
 
-//int count = 0;
-
 void SingleFilter(void* data)
 {
-	//static int count = 0;
-	//count += 1;
-
 	char mapData1[2048] = { 0 };
 
 	strlcpy(mapData1, (char*)data, strlen((char*)data) + 1);
 
 	//const char* name = getfield(enclaveData1, 9);
 	const char* delay = getfield(mapData1, 2);
-	float arrDelay = atoi(delay);
+	int arrDelay = atoi(delay);
 
 	if (arrDelay > 0)
 	{
 		//printf("%d\n", count);
 
 		// write data to a csv file, ready to transfer to node running SingleReduce()
-		// enclave can't write ****, so try to save Map result to linked list 
 
 		SaveData* traversing = saveData;
 
@@ -333,80 +316,118 @@ void SingleReduce(void* data)
 	// finish Reduce process, wait for untrusted section to retrieve data
 	// write another Ecall to transform Accumulator structure information to char array
 
-	//PrintResult();
 }
-/*
-void PrintResult()
+
+struct TestData
 {
-	Accumulator* traversing = listAccumulator;
+	sgx_spinlock_t 	spinlock 	= SGX_SPINLOCK_INITIALIZER;
+	char			data[2048]	= { 0 };
+};
+TestData testData[MAX_SIZE];
 
-	while (traversing != NULL)
+//int indexTestData = 0;
+
+void TestMap(void* data)
+{
+	static int indexTestData = 0;
+
+	char result[2048] = { 0 };
+
+	char enclaveData1[2048] = { 0 };
+	char enclaveData2[2048] = { 0 };
+	strlcpy(enclaveData1, (char*)data, strlen((char*)data) + 1);
+	strlcpy(enclaveData2, (char*)data, strlen((char*)data) + 1);
+
+	const char* name = getfield(enclaveData1, 9);
+	const char* delay = getfield(enclaveData2, 15);
+
+	//char result[2048] = { 0 };
+	strlcpy(result, name, sizeof(name));
+	strncat(result, ",", 1);
+	strncat(result, delay, strlen(delay));
+
+	while (1)
 	{
-		printf("%d %s delayed carriers: total delayed time %f\n", traversing->count, traversing->uniqueCarrier, traversing->delay);
-
-		traversing = traversing->next;	
+		sgx_spin_lock( &(testData[indexTestData].spinlock) );
+		if (testData[indexTestData].data[0] == '\0')
+		{
+			strlcpy(testData[indexTestData].data, result, sizeof(result));
+			sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+			indexTestData = (indexTestData + 1) % MAX_SIZE;
+			break;
+		}
+		sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+		indexTestData = (indexTestData + 1) % MAX_SIZE;
 	}
-	
-	traversing = NULL;
+
 }
-*/
+
+void TestFilter(void* data)
+{
+	//printf("%s\n", (char*)data);
+
+	static int indexTestData = 0;
+
+	char mapData[2048] = { 0 };
+
+	strlcpy(mapData, (char*)data, strlen((char*)data) + 1);
+
+	const char* delay = getfield(mapData, 2);
+	int arrDelay = atoi(delay);
+
+	if (arrDelay > 0)
+	{
+		while (1)
+		{
+			sgx_spin_lock( &(testData[indexTestData].spinlock) );
+			if (testData[indexTestData].data[0] == '\0')
+			{
+				strlcpy(testData[indexTestData].data, (char*)data, sizeof((char*)data));
+				sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+				indexTestData = (indexTestData + 1) % MAX_SIZE;
+				break;
+			}
+			sgx_spin_unlock( &(testData[indexTestData].spinlock) );
+			indexTestData = (indexTestData + 1) % MAX_SIZE;
+		}	
+	}
+}
+
+void TestReduce(void* data)
+{
+	// not sure if we can optimize SingleReduce() more
+}
+
+
+struct DoneProcessing
+{
+	sgx_spinlock_t	spinlock;
+	bool 			isDone = false;
+};
+DoneProcessing doneProcessing;
 
 void EcallStartResponder( HotCall* hotEcall, CheckIsDone* checkIsDone )
 {
-	void (*callbacks[4])(void*);
+	void (*callbacks[7])(void*);
 	callbacks[0] = MapFilterReduce;
 	callbacks[1] = SingleMap;
 	callbacks[2] = SingleFilter;
 	callbacks[3] = SingleReduce;
+	callbacks[4] = TestMap;
+	callbacks[5] = TestFilter;
+	callbacks[6] = TestReduce;
 
     HotCallTable callTable;
-    callTable.numEntries = 4;
+    callTable.numEntries = 7;
     callTable.callbacks  = callbacks;
 
     HotCall_waitForCall( hotEcall, &callTable, checkIsDone );
 
+	sgx_spin_lock( &(doneProcessing.spinlock) );
+	doneProcessing.isDone = true;
+	sgx_spin_unlock( &(doneProcessing.spinlock) );
+
 	printf("Enclave out\n");
-}
-
-void EcallCopyDataToUntrustedLand(HotCall*	hotOcall)
-{
-	const uint16_t requestedCallID = 0;
-
-	Accumulator* traversing = listAccumulator;
-	Accumulator* listAccu[MAX_SIZE];
-
-	int index = 0;
-
-	while(traversing != NULL)
-	{
-		listAccu[index] = traversing;
-
-		int noti = HotCall_requestCall(hotOcall, requestedCallID, (void **)listAccu, index);
-		if (noti == -1)
-		{
-			//printf("Enclave: Exceeded retry attempts\n");
-			exceeded += 1;
-		}
-		traversing = traversing->next;
-
-		index = (index + 1) % MAX_SIZE;
-	}
-
-	//signalEnd( checkIsDone );
-
-	Accumulator* deleting = listAccumulator;
-	traversing = listAccumulator;
-
-	while(traversing != NULL)
-	{
-		deleting = traversing;
-		traversing = traversing->next;
-		delete deleting;
-	}
-
-	traversing = deleting = NULL;
-
-	printf("[+] Enclave: %d attemps exceeded retry limits\n", exceeded);
 }
 
 void ChangeIntToCharArray(int num, char* dst)
@@ -483,7 +504,6 @@ void EcallCopyDataToUntrustedLand2(HotCall* hotOcall)
 	printf("[+] Enclave: %d attempts exceeded retry limits\n", exceeded);
 }
 
-
 void EcallCopyDataToUntrustedLand3(HotCall* hotOcall)
 {
 	const uint16_t requestedCallID = 1; // code them callID ben untrusted
@@ -550,6 +570,60 @@ void EcallCopyDataToUntrustedLand3(HotCall* hotOcall)
 	printf("[+] Enclave: %d attempts exceeded retry limits\n", exceeded);
 }
 
+void EcallCopyDataToUntrustedLand4(HotCall* hotOcall)
+{
+	static int indexWriteTestData = 0;
+
+	const uint16_t requestedCallID = 1;
+
+	char 		tempArray[2048];
+	char 		enclaveCharArray[MAX_SIZE][2048];
+	char*		pointerToEnclaveCharArray[MAX_SIZE];
+
+	int countDown = MAX_SIZE;
+
+	for (int i = 0; i < MAX_SIZE; i++)
+	{
+		pointerToEnclaveCharArray[i] = enclaveCharArray[i];
+	}
+
+	while(1)
+	{
+		sgx_spin_lock( &(doneProcessing.spinlock) );
+		if (doneProcessing.isDone == true)
+		{
+			sgx_spin_unlock( &(doneProcessing.spinlock) );
+			
+			if (countDown > 0)
+			{
+				countDown -= 1;
+			}
+			else break;
+		}
+		sgx_spin_unlock( &(doneProcessing.spinlock) );
+
+		sgx_spin_lock( &(testData[indexWriteTestData].spinlock));
+		if (testData[indexWriteTestData].data[0] != '\0')
+		{
+			strlcpy(tempArray, testData[indexWriteTestData].data, sizeof(testData[indexWriteTestData].data));
+			testData[indexWriteTestData].data[0] = '\0';
+			sgx_spin_unlock( &(testData[indexWriteTestData].spinlock));
+			indexWriteTestData = (indexWriteTestData + 1) % MAX_SIZE;
+			
+			int noti = HotCall_requestCall_v2(hotOcall, requestedCallID, (void **)pointerToEnclaveCharArray, (void *)tempArray, indexWriteTestData);
+			if (noti == -1)
+			{
+				exceeded += 1;
+			}
+
+			continue;
+		}
+		sgx_spin_unlock( &(testData[indexWriteTestData].spinlock));
+		indexWriteTestData = (indexWriteTestData + 1) % MAX_SIZE;
+	}
+
+	printf("[+] Enclave: %d attempts exceeded retry limits\n", exceeded);
+}
 
 /* 
  * printf: 

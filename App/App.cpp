@@ -236,8 +236,6 @@ void* EnclaveResponderThread( void* passToThreadAsVoidP)
     return NULL;
 }
 
-char untrustedData[2048] = { 0 };
-
 void CopyData(void *data)
 {
     strcpy(accumulator.uniqueCarrier, ((Accumulator*)data)->uniqueCarrier);
@@ -255,10 +253,12 @@ void WriteDataToCSV(void* data)
     switch (callID)
     {
     case 1:
+    case 4:
         strcpy(filename, "MapResult.csv");
         break;
 
     case 2:
+    case 5:
         strcpy(filename, "FilterResult.csv");
         break;
     
@@ -303,20 +303,17 @@ void* OcallResponderThread( void* passToThreadAsVoidP)
 
     return NULL;
 }
-/*
-void WTF(HotCall* hotCall, char data[][2048], int index)
-{
-    hotCall[index].data = data[index];
 
-    //printf("wtf?\n");
-    //printf("%s\n", hotCall[index].data);
-}
-*/
+pthread_t testThread1 = 0, testThread2 = 0, testThread3 = 0;
+
+
 class HotCallsTesterError {};
 
 pthread_t thread1 = 0, thread2 = 0;
 
 int exceeded = 0;
+
+
 
 class HotCallsTester {
 public:
@@ -339,7 +336,7 @@ public:
 
     void Run( void ) 
     {
-        callID = 1;
+        callID = 3;
 
         uint64_t    startTime       = 0;
         uint64_t    endTime         = 0;
@@ -350,238 +347,39 @@ public:
         switch (callID)
         {
         case 1:
+        case 4:
             strcpy(filename, "2008.csv");
             break;
 
         case 2:
+        case 5:
             strcpy(filename, "MapResult.csv");
             break;
 
         case 3:
             strcpy(filename, "FilterResult.csv");
             break;
+
         
         default:
             printf("WHAET? Commando no understando...\n");
             exit(-1);
         }
-
-
-        //strcpy(filename, "MapResult.csv");
-        
         
         startTime = rdtscp();
 
         CallEnclaveToDoYourBidding(filename, callID);
-
-        //sleep(10);
         
-        RetrieveResultFromEnclave();
-        //Test();
+        //RetrieveResultFromEnclave();
+
+        //StillCallEnclaveButWithMultithreading(filename, callID);
 
         endTime = rdtscp();
 
         printf("[+] Executed time: %ld\n", endTime - startTime);
         printf("[+] Untrusted: %d attempts exceeded retry limits\n", exceeded);
     }
-    /*
-    void Test()
-    {
-        string untrustedString;
-        char untrustedArray[MAX_SIZE][2048];
 
-        HotCall wao[MAX_SIZE];
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            HotCall_init(&wao[i]);
-        }
-
-        //void *wat = NULL;
-
-        int index = 0;
-
-        fstream fin;
-        fin.open("20082.csv", ios::in);
-        getline(fin, untrustedString);
-
-        while(getline(fin, untrustedString))
-        {
-            strcpy(untrustedArray[index], untrustedString.c_str());
-            //printf("Index: %d %s\n", index, untrustedCharArray);
-            //int noti = HotCall_requestCall(hotEcall, requestedCallID, (void **)untrustedCharArray, index); // hotEcall.data la con tro tro vao untrustedArray, 
-                                                                                                // dan toi khi goi strcpy lam thay doi noi dung, dan toi copy sai khac vao enclave
-
-            //wat = untrustedArray[index];
-
-            //wao[index].data = untrustedArray[index];
-
-            WTF(wao, untrustedArray, index);
-
-            printf("Sum data: %s\n", (char *)wao[index].data);
-
-            index = (index + 1) % MAX_SIZE;
-        }
-
-    }
-    */
-    /*
-    void CsvDataToEnclave()
-    {
-        string      untrustedString;
-        //char        untrustedCharArray[2048] = { 0 };
-
-        char        tempArray[2048];
-        char        untrustedCharArray[MAX_SIZE][2048];
-        char*       pointerToUntrustedCharArray[MAX_SIZE];
-
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            pointerToUntrustedCharArray[i] = untrustedCharArray[i];
-        }
-
-        //HotCall     hotEcall        = HOTCALL_INITIALIZER;
-        //hotEcall.data               = &untrustedCharArray;
-
-        HotCall     hotEcall[MAX_SIZE];
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            HotCall_init(&hotEcall[i]);
-            //printf("%d %p\n", i, hotEcall[i]);
-        }
-
-        int index = 0;
-
-        fstream fin;
-        fin.open("2008.csv", ios::in);
-        getline(fin, untrustedString);
-
-        globalEnclaveID = m_enclaveID;
-        //pthread_create(&hotEcall.responderThread, NULL, EnclaveResponderThread, (void*)&hotEcall);
-        
-        pthread_create(&thread1, NULL, EnclaveResponderThread, (void*)hotEcall);
-
-        const uint16_t requestedCallID = 0;
-
-        
-        while(getline(fin, untrustedString))
-        {
-            
-            while (true)
-            {
-                sgx_spin_lock( &(hotEcall[index].spinlock));
-
-                if( hotEcall[index].busy == false && hotEcall[index].data == NULL) {
-                    strcpy(untrustedCharArray[index], untrustedString.c_str());
-                    sgx_spin_unlock( &(hotEcall[index].spinlock) );
-                    break;
-        
-                }
-
-                sgx_spin_unlock( &(hotEcall[index].spinlock) );
-
-                for(int i = 0; i<10; ++i)
-                    _mm_pause();
-            }
-
-           
-
-            //strcpy(untrustedCharArray[index], untrustedString.c_str());
-            //strcpy(tempArray, untrustedString.c_str());
-
-            int noti = HotCall_requestCall(hotEcall, requestedCallID, (void **)pointerToUntrustedCharArray, index); // hotEcall.data la con tro tro vao untrustedArray, 
-                                                                                                // dan toi khi goi strcpy lam thay doi noi dung, dan toi copy sai khac vao enclave
-            if (noti == -1)
-            {
-                //printf("Untrusted: Exceeded retry attempts\n");
-                exceeded += 1;
-            }
-
-            //printf("Sum data: %s\n", hotEcall[index].data);
-            //printf("Call from untrusted\n");
-            //printf("Data?: %s\n", untrustedCharArray[index]);
-            //printf("Data?: %s\n", hotEcall[index].data);
-            //sleep(1);
-
-            //for(int i = 0; i < 10; i++)
-            //{
-            //    printf("%s\n", hotEcall[i].data);
-            //}
-            index = (index + 1) % MAX_SIZE;
-
-        }
-
-        //printf("Index value: %d\n", index);
-        
-        int stopPolling = 0;
-        int traversing = 0;
-        while (1)
-        {   
-            stopPolling = 0;
-            traversing = 0;
-            for (traversing; traversing < MAX_SIZE; traversing++)
-            {
-                sgx_spin_lock( &(hotEcall[traversing].spinlock) );
-                if (hotEcall[traversing].keepPolling == false)
-                {
-                    stopPolling += 1;
-                }
-                sgx_spin_unlock( &(hotEcall[traversing].spinlock) );
-            }
-            if (stopPolling == MAX_SIZE)
-            {
-                break;
-            }
-        }
-        
-
-        sleep(10);
-        StopResponder(hotEcall);
-    }
-    */
-    /*
-    void ResultToUntrusted()
-    {
-        //HotCall     hotOcall    = HOTCALL_INITIALIZER;
-        //hotOcall.data           = &accumulator;
-
-        HotCall hotOcall[MAX_SIZE];
-        for (int i = 0; i < MAX_SIZE; i++)
-        {
-            HotCall_init(&hotOcall[i]);
-        }
-
-        //pthread_create(&hotOcall.responderThread, NULL, OcallResponderThread, (void*)&hotOcall);
-        pthread_create(&thread2, NULL, OcallResponderThread, (void*)hotOcall);
-
-        EcallCopyDataToUntrustedLand(m_enclaveID, hotOcall);
-        
-        sleep(15);
-        StopResponder(hotOcall);
-
-        
-        int stopPolling = 0;
-        int index = 0;
-        while (1)
-        {   
-            stopPolling = 0;
-            index = 0;
-            for (index; index < MAX_SIZE; index++)
-            {
-                sgx_spin_lock( &(hotOcall[index].spinlock) );
-                if (hotOcall[index].keepPolling == false)
-                {
-                    stopPolling += 1;
-                }
-                sgx_spin_unlock( &(hotOcall[index].spinlock) );
-            }
-            if (stopPolling == MAX_SIZE)
-            {
-                break;
-            }
-        }
-        
-    }
-    */
     void CallEnclaveToDoYourBidding(const char* filename, const uint16_t requestedCallID)
     {
         string untrustedString;
@@ -615,13 +413,12 @@ public:
 
         fstream fin;
         fin.open(filename, ios::in);
-        //fin.open("20082.csv", ios::in);
-        //getline(fin, untrustedString);
 
         globalEnclaveID = m_enclaveID;
 
         //pthread_create(&hotEcall.responderThread, NULL, EnclaveResponderThread, (void*)&hotEcall);
         //pthread_create(&thread1, NULL, EnclaveResponderThread, (void*)hotEcall);
+
         int notiThread = pthread_create(&thread1, NULL, EnclaveResponderThread, (void*)&passToThread);
         if (notiThread != 0)
         {
@@ -629,9 +426,7 @@ public:
             exit(-1);
         }
 
-        //const uint16_t requestedCallID = 1;
-
-        int test = 0;
+        //int test = 0;
 
         while (getline(fin, untrustedString))
         {
@@ -644,8 +439,8 @@ public:
                 exceeded += 1;
             }
 
-            printf("[+] Untrusted: %d\n", test);
-            test = test + 1;
+            //printf("[+] Untrusted: %d\n", test);
+            //test = test + 1;
 
             index = (index + 1) % MAX_SIZE;
         }
@@ -655,6 +450,8 @@ public:
         signalEnd( &checkIsDone );
 
         pthread_join(thread1, NULL);
+
+        this->RetrieveResultFromEnclave();
 
         //sleep(5);
         //StopResponder(hotEcall);
@@ -699,6 +496,127 @@ public:
         //sleep(10);
         //StopResponder(hotOcall);
     }
+
+    void StillCallEnclaveButWithMultithreading(const char* filename, const uint16_t requestedCallID)
+    {
+        string      untrustedString;
+
+        char        tempArray[2048] = { 0 };
+        char        untrustedCharArray[MAX_SIZE][2048];
+        char*       pointerToUntrustedCharArray[MAX_SIZE];
+
+        HotCall     hotEcall[MAX_SIZE];
+
+        for (int i = 0; i < MAX_SIZE; i++)
+        {
+            pointerToUntrustedCharArray[i] = untrustedCharArray[i];
+
+            HotCall_init( &hotEcall[i]);
+        }
+
+        CheckIsDone checkIsDone;
+        CheckIsDone_init(&checkIsDone);
+
+        PassToThread passToThread;
+        passToThread.hotCall        = hotEcall;
+        passToThread.checkIsDone    = &checkIsDone;
+
+        int index = 0;
+        //int countingDown = 0;
+
+        printf("%s\n", filename);
+
+        fstream fin;
+        fin.open(filename, ios::in);
+
+        globalEnclaveID = m_enclaveID;
+
+        int notiThread1 = pthread_create(&testThread1, NULL, EnclaveResponderThread, (void*)&passToThread);
+        if (notiThread1 != 0)
+        {
+            printf("No Thread?\n");
+            exit(-1);
+        }
+
+        int notiThread2 = pthread_create(&testThread2, NULL, StillRetrieveResultButSpawnedFromCall, NULL);
+        if (notiThread2 != 0)
+        {
+            printf("No Thread?\n");
+            exit(-1);
+        }
+
+        while (getline(fin, untrustedString))
+        {
+            strcpy(tempArray, untrustedString.c_str());
+
+            int noti = HotCall_requestCall_v2(hotEcall, requestedCallID, (void **)pointerToUntrustedCharArray, (void *)tempArray, index);
+
+            if (noti == -1)
+            {
+                exceeded += 1;
+            }   
+
+            //printf("[+] Untrusted: %d\n", countingDown);
+            //countingDown += 1;
+            index = (index + 1) % MAX_SIZE;
+        }
+
+        fin.close();
+
+        signalEnd( &checkIsDone );
+
+        pthread_join(testThread1, NULL);
+        pthread_join(testThread2, NULL);
+        pthread_join(testThread3, NULL);
+    }
+
+
+    static void* StillRetrieveResultButSpawnedFromCall(void* lorenIpsum)
+    {
+        HotCall hotOcall[MAX_SIZE];
+        for (int i = 0; i < MAX_SIZE; i++)
+        {
+            HotCall_init(&hotOcall[i]);
+        }
+
+        CheckIsDone checkIsDone;
+        CheckIsDone_init(&checkIsDone);
+
+        PassToThread passToThread;
+        passToThread.hotCall = hotOcall;
+        passToThread.checkIsDone = &checkIsDone;
+
+        //pthread_create(&thread2, NULL, OcallResponderThread, (void*)hotOcall);
+        int notiThread = pthread_create(&testThread3, NULL, OcallResponderThread, (void*)&passToThread);
+        if (notiThread != 0)
+        {
+            printf("SKYFALLLLLLLLLLLLLL!!!!!!!!!!!!!\n");
+            exit(-1);   
+        }
+
+        if (callID != 3)
+        {
+            EcallCopyDataToUntrustedLand4(globalEnclaveID, hotOcall);
+            
+            // sum code goes here
+        }
+        else
+        {
+            //EcallCopyDataToUntrustedLand3(m_enclaveID, hotOcall);
+        
+            // TODO TODO TODO
+        }
+
+        signalEnd( &checkIsDone );
+
+        pthread_join(testThread3, NULL);
+
+        //sleep(10);
+
+        return NULL;
+    }
+
+
 
 private:
     /* Global EID shared by multiple threads */

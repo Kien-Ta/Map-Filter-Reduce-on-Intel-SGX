@@ -89,7 +89,11 @@ void MapFilterReduce(void* data);
 void SingleMap(void* data);
 void SingleFilter(void* data);
 void SingleReduce(void* data);
-//void PrintResult();
+
+void TestMap(void* data);
+void TestFilter(void* data);
+void TestReduce(void* data);
+
 #if defined(__cplusplus)
 }
 #endif

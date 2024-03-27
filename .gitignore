@@ -1,6 +1,5 @@
+*.o
 *.so
 *.csv
 *.txt
-/measurments/*
 /mapfilterreduce
-
